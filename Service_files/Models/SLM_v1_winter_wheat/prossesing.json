@@ -1,0 +1,7 @@
+{
+"parm_list": ["ndvi_ozim"],
+
+"time_borders":[50, 245],
+
+"normalization": [1] 
+}

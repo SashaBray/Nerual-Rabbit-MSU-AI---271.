@@ -1,0 +1,13 @@
+{
+"parm_list": [
+                     "mean_ndvi_7dc_modis_int_ozim",  
+		     "mean_temp_acc", 
+		     "mean_prod"     
+],
+
+"time_borders":[0, 160],
+"features_pross": ["max"],
+"averaging": 55, 
+"scalars": ["mean_prod"],
+"normalization": [1, 5000, 70] 
+}
