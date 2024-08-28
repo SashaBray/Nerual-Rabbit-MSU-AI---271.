@@ -297,68 +297,107 @@ class TimeRow:
         """Функция возвращает исходные данные"""
         return self.data_array, self.calendar_dict
 
-    def function(self, target_date, padding = 'closest_value', parm=0):        # target date - номер дня в формате float
+    # def function(self, target_date, padding = 'closest_value', parm=0):        # target date - номер дня в формате float
+    #     """Функция возвращает значение графика в произвольное время, используя линейную аппроксимацию между двумя ближайшими имеющимися датами"""
+    #
+    #     if self.status == True:     # Если временной ряд существует
+    #         last_data = self.last_data_data
+    #         first_data = self.first_data_data
+    #         year = self.year
+    #         zero_data = self.zero_data
+    #         minus_zero_data = self.minus_zero_data
+    #         data_array = self.data_array
+    #         target_date = float(target_date)
+    #         target_date = target_date + parm
+    #
+    #         days_in_this_year = self.days_in_this_year
+    #
+    #         if padding == 'closest_value':
+    #             new_data_array = [[-days_in_this_year*2, data_array[0][1]], [data_array[0][0], data_array[0][1]]]
+    #             new_data_array = new_data_array + data_array
+    #
+    #             # new_data_array = data_array
+    #             new_data_array = new_data_array + [[data_array[-1][0], data_array[-1][1]], [days_in_this_year*2, data_array[-1][1]]]
+    #             data_array = new_data_array
+    #             # print('data_array', data_array)
+    #
+    #         if padding == 'zeros':
+    #             new_data_array = [[-days_in_this_year*2, 0], [data_array[0][0], 0]]
+    #             new_data_array = new_data_array + data_array
+    #
+    #             # new_data_array = data_array
+    #             new_data_array = new_data_array + [[data_array[-1][0], 0], [days_in_this_year*2, 0]]
+    #             data_array = new_data_array
+    #             # print('data_array', data_array)
+    #
+    #         function = None
+    #
+    #         for i in range(len(data_array)-1):
+    #
+    #             time_now = float(data_array[i][0])
+    #             time_next = float(data_array[i+1][0])
+    #
+    #             if (target_date >= time_now) and (target_date < time_next):
+    #                 value_now = float(data_array[i][1])
+    #                 value_next = float(data_array[i + 1][1])
+    #                 k = (value_next - value_now) / (time_next - time_now)
+    #                 c = value_now
+    #                 function = (target_date-time_now) * k + c
+    #
+    #                 break
+    #
+    #         if function == None:
+    #             if (target_date > time_now) and (target_date <= time_next):
+    #                 value_now = float(data_array[i][1])
+    #                 value_next = float(data_array[i + 1][1])
+    #                 k = (value_next - value_now) / 2
+    #                 c = value_now
+    #                 function = (target_date - time_now) * k + c
+    #
+    #
+    #     else:
+    #         function = np.array([])
+    #
+    #     return function
+
+
+    def function(self, target_date, padding = 'zeros', parm=0):        # target date - номер дня в формате float
         """Функция возвращает значение графика в произвольное время, используя линейную аппроксимацию между двумя ближайшими имеющимися датами"""
+        last_data = self.last_data_data
+        first_data = self.first_data_data
+        year = self.year
+        zero_data = self.zero_data
+        minus_zero_data = self.minus_zero_data
+        data_array = self.data_array
+        target_date = float(target_date)
+        target_date = target_date + parm
 
-        if self.status == True:     # Если временной ряд существует
-            last_data = self.last_data_data
-            first_data = self.first_data_data
-            year = self.year
-            zero_data = self.zero_data
-            minus_zero_data = self.minus_zero_data
-            data_array = self.data_array
-            target_date = float(target_date)
-            target_date = target_date + parm
+        days_in_this_year = self.days_in_this_year
 
-            days_in_this_year = self.days_in_this_year
+        # print(data_array)
 
-            if padding == 'closest_value':
-                new_data_array = [[-days_in_this_year*2, data_array[0][1]], [data_array[0][0], data_array[0][1]]]
-                new_data_array = new_data_array + data_array
+        if padding == 'closest_value':
+            new_data_array = [[-days_in_this_year*2, data_array[0][1]], [data_array[0][0], data_array[0][1]]]
+            new_data_array = new_data_array + data_array
+            new_data_array = new_data_array + [[data_array[-1][0], data_array[-1][1]], [days_in_this_year*2, data_array[-1][1]]]
+            data_array = new_data_array
 
-                # new_data_array = data_array
-                new_data_array = new_data_array + [[data_array[-1][0], data_array[-1][1]], [days_in_this_year*2, data_array[-1][1]]]
-                data_array = new_data_array
-                # print('data_array', data_array)
+        if padding == 'zeros':
+            new_data_array = [[-days_in_this_year * 2, 0], [data_array[0][0], 0]]
+            new_data_array = new_data_array + data_array
+            new_data_array = new_data_array + [[data_array[-1][0], 0], [days_in_this_year * 2, 0]]
+            data_array = new_data_array
 
-            if padding == 'zeros':
-                new_data_array = [[-days_in_this_year*2, 0], [data_array[0][0], 0]]
-                new_data_array = new_data_array + data_array
+        new_data_array_np = np.array(new_data_array)
+        new_data_array_np = np.float32(new_data_array_np)
 
-                # new_data_array = data_array
-                new_data_array = new_data_array + [[data_array[-1][0], 0], [days_in_this_year*2, 0]]
-                data_array = new_data_array
-                # print('data_array', data_array)
+        time_data = new_data_array_np[:, 0]
+        value_data = new_data_array_np[:, 1]
 
-            function = None
-
-            for i in range(len(data_array)-1):
-
-                time_now = float(data_array[i][0])
-                time_next = float(data_array[i+1][0])
-
-                if (target_date >= time_now) and (target_date < time_next):
-                    value_now = float(data_array[i][1])
-                    value_next = float(data_array[i + 1][1])
-                    k = (value_next - value_now) / (time_next - time_now)
-                    c = value_now
-                    function = (target_date-time_now) * k + c
-
-                    break
-
-            if function == None:
-                if (target_date > time_now) and (target_date <= time_next):
-                    value_now = float(data_array[i][1])
-                    value_next = float(data_array[i + 1][1])
-                    k = (value_next - value_now) / 2
-                    c = value_now
-                    function = (target_date - time_now) * k + c
-
-
-        else:
-            function = np.array([])
+        function = np.interp(target_date, time_data, value_data)
 
         return function
+
 
     def get_array_by_size(self, my_size,
                           padding='closest_value', # 'zeros',

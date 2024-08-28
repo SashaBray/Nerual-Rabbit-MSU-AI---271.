@@ -41,7 +41,7 @@ from sklearn.datasets import make_regression
 
 class CalculationTask():
     """Класс является носителем информации о расчетном задании"""
-    def __init__(self, task_file=None, years=None, target=None, success=None, directory = 'Destination_files\\'.replace('\\', os.sep),
+    def __init__(self, task_file=None, years=None, prediction_years_iteration = 0, target=None, success=None, directory = 'Destination_files\\'.replace('\\', os.sep),
                  column_predict=None, column_models=None, models_list = None,
                  task_file_reserw=None, login=None, password=None,
                  culture=None, years_to_back=None, current_day=None, avegage_last=None, years_for_correct=1,
@@ -49,6 +49,7 @@ class CalculationTask():
 
         self.task_file = task_file
         self.prediction_years = years
+        self.prediction_years_iteration = prediction_years_iteration
         self.target = target
         self.success = success
         self.directory = directory
@@ -303,6 +304,8 @@ def print_metrics(y_true, y_predicted, x_train, answer) -> Answer:
     print('predicted_for_metrics', y_predicted)
     print('')
 
+    y_true = np.array(y_true)
+    y_predicted = np.array(y_predicted)
     x_shape, y_shape = max(y_true.shape), min(y_true.shape)
 
     print(f"Mean squared error: {mean_squared_error(y_true, y_predicted):.3f}")
@@ -322,8 +325,8 @@ def print_metrics(y_true, y_predicted, x_train, answer) -> Answer:
     answer.inf_unconditional.setdefault('Root mean squared error', mean_squared_error(y_true, y_predicted, squared=False))
     answer.inf_unconditional['Root mean squared error'] = mean_squared_error(y_true, y_predicted, squared=False)
 
-    answer.inf_unconditional.setdefault('Max absolute error', max(abs(y_true.reshape(x_shape, y_shape) - y_predicted.reshape(x_shape, y_shape))))
-    answer.inf_unconditional['Max absolute error'] = max(abs(y_true.reshape(x_shape, y_shape) - y_predicted.reshape(x_shape, y_shape)))
+    answer.inf_unconditional.setdefault('Max absolute error', abs(y_true.reshape(-1, x_shape) - y_predicted.reshape(-1, x_shape)).max())
+    answer.inf_unconditional['Max absolute error'] = abs(y_true.reshape(-1, x_shape) - y_predicted.reshape(-1, x_shape)).max()
 
     answer.inf_unconditional.setdefault('Mean absolute error', mean_absolute_error(y_true, y_predicted))
     answer.inf_unconditional['Mean absolute error'] = mean_absolute_error(y_true, y_predicted)
@@ -350,7 +353,7 @@ def print_settlement_information(answer, data, target, task):
     years = data[3]
     maximums = data[0]
 
-    headline = task.prediction_years[0] + '_ndvi_max'
+    headline = task.prediction_years[task.prediction_years_iteration] + '_ndvi_max'
     value = target
     answer.additional_inf.setdefault(headline, value)
 
@@ -367,16 +370,16 @@ def create_years_ndvi_line_graphic(data, task, row, way='Report_files\\Graphs\\'
     '''Функция получает информацию и создает гарфик изменения ndvi и урожайности в разные годы'''
 
     YEARS = copy.deepcopy(data[3]) # Заводим массив годов
-    # if not int(task.prediction_years[0]) in YEARS:
-    #     YEARS.append(int(task.prediction_years[0]))  # Если в списке нет изучаемого года, он добавляется
+    # if not int(task.prediction_years[task.prediction_years_iteration]) in YEARS:
+    #     YEARS.append(int(task.prediction_years[task.prediction_years_iteration]))  # Если в списке нет изучаемого года, он добавляется
 
     NDVI_YEARS = copy.deepcopy(data[0])    # Заводим переменную с макс знач ndvi
 
-    # print('heheh', int(task.prediction_years[0]) in NDVI_YEARS)
+    # print('heheh', int(task.prediction_years[task.prediction_years_iteration]) in NDVI_YEARS)
 
-    if not int(task.prediction_years[0]) in YEARS:
+    if not int(task.prediction_years[task.prediction_years_iteration]) in YEARS:
         NDVI_YEARS_interim = [data[2]]
-        YEARS_interim = [int(task.prediction_years[0])]
+        YEARS_interim = [int(task.prediction_years[task.prediction_years_iteration])]
 
         # NDVI_YEARS_interim.append(NDVI_YEARS)  # Если в списке нет изучаемого года, добавляем ndvi этого года
         # YEARS_interim.append(YEARS)
@@ -518,27 +521,27 @@ def make_graphs_to_illustrate_simple_linear_model(row, regressor, task, data):
         district = '-'
 
     linear_graph_name = region + '_' + str(region_id) + '_' + district + '_' + str(district_id) + '_' + str(
-        task.prediction_years[0]) + \
+        task.prediction_years[task.prediction_years_iteration]) + \
                         '_' + 'line_graph' + '_' + 'SLM'
 
     way = 'Report_files\\Graphs\\PDF\\'.replace('\\', os.sep)
     create_years_ndvi_line_graphic(data, task, row, way=way, file_name=linear_graph_name, vector=True)
 
     linear_graph_name = region + '_' + str(region_id) + '_' + district + '_' + str(district_id) + '_' + str(
-        task.prediction_years[0]) + \
+        task.prediction_years[task.prediction_years_iteration]) + \
                         '_' + 'line_graph' + '_' + 'SLM'
 
     way = 'Report_files\\Graphs\\JPG\\'.replace('\\', os.sep)
     create_years_ndvi_line_graphic(data, task, row, way=way, file_name=linear_graph_name, vector=False)
 
     linear_graph_name = region + '_' + str(region_id) + '_' + district + '_' + str(district_id) + '_' + str(
-        task.prediction_years[0]) + \
+        task.prediction_years[task.prediction_years_iteration]) + \
                         '_' + 'point_graph' + '_' + 'SLM'
     way = 'Report_files\\Graphs\\PDF\\'.replace('\\', os.sep)
     create_years_ndvi_point_graphic(data, task, row, regressor, way=way, file_name=linear_graph_name, vector=True)
 
     linear_graph_name = region + '_' + str(region_id) + '_' + district + '_' + str(district_id) + '_' + str(
-        task.prediction_years[0]) + \
+        task.prediction_years[task.prediction_years_iteration]) + \
                         '_' + 'point_graph' + '_' + 'SLM'
     way = 'Report_files\\Graphs\\JPG\\'.replace('\\', os.sep)
     create_years_ndvi_point_graphic(data, task, row, regressor, way=way, file_name=linear_graph_name, vector=False)
@@ -741,24 +744,18 @@ def make_design(phrase: [str], task):       # Обработка входящи�
 
 
 def сonduct_user_survey():
-
     availability_survey = True
     task = CalculationTask()
-
     command_2 = '     Завершить работу'
 
     while availability_survey:
-
         print('Введите команду:') # \n')
         print('     Сделать прогноз по расчетному заданию ')
         print('     Завершить работу')
 
         phrase = input()
-
         if phrase != command_2:
             task = make_design(phrase, task)
-            # if task.year != None and task.prediction_year != None and task.target != None:
-            #     break
             break
         elif phrase == command_2:
             break
@@ -771,10 +768,8 @@ def fast_user_survey():
     """Инициализация экземпляра класса задания с указанием расчетного файла"""
     task = CalculationTask(task_file='Destination template.xlsx', login='fki22_SB',
                             password='MAILoveforever2022', culture='озимая пшеница',
-                           years_to_back=5, current_day=171, avegage_last=4,
-                           years_for_correct=4
-                           , correction=True)
-
+                           years_to_back=7, current_day=171, avegage_last=5,
+                           years_for_correct=4, correction=False)
     return task
 
 
@@ -859,7 +854,7 @@ def chek_file(parm, row, task):           # Потом допишу...
     if 'historical' in parm:
         year = 'interannual'
     else:
-        year = task.prediction_years[0]
+        year = task.prediction_years[task.prediction_years_iteration]
 
     if 'historical' in parm:
         file_name = str(parm).replace('_historical', '') + '_' + str(id_region) + '_' + str(id_dist) + '_' + str(year) #+ '.json'
@@ -911,7 +906,7 @@ def read(parm, row, task, time_rows_size=365):
         print('Открытие файл...', file_name)
 
     else:
-        year = task.prediction_years[0]
+        year = task.prediction_years[task.prediction_years_iteration]
         file_name = str(parm) + '_' + str(id_region) + '_' + str(id_dist) + '_' + str(year)
         print('Открытие файл...', file_name)
 
@@ -972,7 +967,7 @@ def write_time_row_json(json, row, task, parm, directory='Temporary_information\
         id_region = str(row['id_region'])
 
     if hist == False:
-        year = task.prediction_years[0]
+        year = task.prediction_years[task.prediction_years_iteration]
     else:
         year = 'historical'
 
@@ -986,7 +981,7 @@ def write_time_row_json(json, row, task, parm, directory='Temporary_information\
 def find_in_vega(parm, row, vega_api, model, task, make_file=True, hist=False):
 
     product_type = parm
-    year = task.prediction_years[0]
+    year = task.prediction_years[task.prediction_years_iteration]
     masks_pd = model.pd_masks
 
     if str(row['id_district']) != 'nan':
@@ -1063,12 +1058,12 @@ def get_hist_row(parm, row, vega_api, model, task, directory='Temporary_informat
 
     for i in range(task.years_to_back): # Загружаем несколько рядов за прошлые годы
 
-        print(' int(task.prediction_years[0])',  int(task.prediction_years[0]))
-        year_i = int(task.prediction_years[0]) - i
+        print(' int(task.prediction_years[0])',  int(task.prediction_years[task.prediction_years_iteration]))
+        year_i = int(task.prediction_years[task.prediction_years_iteration]) - i
         task_fiction = copy.deepcopy(task)
-        task_fiction.prediction_years[0] = year_i
+        task_fiction.prediction_years[task.prediction_years_iteration] = year_i
         parm_i = parm.replace('_historical', '')
-        print('year', task_fiction.prediction_years[0])
+        print('year', task_fiction.prediction_years[task.prediction_years_iteration])
 
         time_data, file_name_last, directory = get_not_hist_row(parm_i, row, vega_api, model, task_fiction)
 
@@ -1172,7 +1167,7 @@ def get_raw_years_and_prods(row, task, all_years=False, including_current=False)
     for head in heads:
         try:
             year = int(head)
-            if int(year) <= int(task.prediction_years[0]) or including_current:
+            if int(year) <= int(task.prediction_years[task.prediction_years_iteration]) or including_current:
                 if counter <= task.avegage_last or all_years:
                     year_i = int(year)
                     prod_i = float(str(row[year]).replace(',', '.'))
@@ -1204,7 +1199,7 @@ def get_trend_parms(x_points: [list], y_points: [list]) -> tuple:
 
 def find_average_trend_of_prod_in_row(row, task) -> float:
     '''Функция получает строку и задание, собирает похдохящие значения из строки задания, строит регрессию и возвращает тренд.'''
-    list_of_years, list_of_prods = gel_years_list_with_prods(task, row, all_points=True)
+    list_of_years, list_of_prods = gel_years_list_with_prods(task, row, all_points=False)
 
     list_of_years.reverse(), list_of_prods.reverse()
 
@@ -1269,19 +1264,19 @@ def inf_loader(model, row, vega_api, task) -> Tuple[np.array, bool]:     # Ит�
     if ('LM' in model.model_name or 'EXM' in model.model_name) and not('KML' in model.model_name):       # Если модель линейная
         parm = parms[0]     # Загружается параметр для регрессии
         years, _ = gel_years_list_with_prods(task, row)
-        print('years', years, 'prediction_year', task.prediction_years[0])
+        print('years', years, 'prediction_year', task.prediction_years[task.prediction_years_iteration])
 
         for year in years:
-            if year != task.prediction_years[0]:
+            if year != task.prediction_years[task.prediction_years_iteration]:
                 task_fiction = copy.deepcopy(task)  # Создаем фиктивное задание
-                task_fiction.prediction_years[0] = year
+                task_fiction.prediction_years[task.prediction_years_iteration] = year
                 df_new_matrix = get_new_line_timerow(parm, task_fiction, row, model, vega_api, df_new_matrix)
 
         df_new_matrix = get_new_line_timerow(parm, task, row, model, vega_api, df_new_matrix)
 
     elif 'KML' in model.model_name:
         years, prods = gel_years_list_with_prods(task, row, all_points=True)
-        print('years', years, 'prediction_year', task.prediction_years[0])
+        print('years', years, 'prediction_year', task.prediction_years[task.prediction_years_iteration])
 
         try:
             size_data_time = matrix_norm_cut.shape[1]
@@ -1321,7 +1316,7 @@ def inf_loader(model, row, vega_api, task) -> Tuple[np.array, bool]:     # Ит�
                     """Создаем фиктивное задание (копия экземпляра класса с заданием, 
                     чтобы передать ее в функцию, которая собирает исходные данные для прошлых лет)"""
                     task_fiction = copy.deepcopy(task)
-                    task_fiction.prediction_years[0] = year
+                    task_fiction.prediction_years[task.prediction_years_iteration] = year
                     line_i = get_rows_by_parms(parm, task_fiction, row, vega_api, model, size_data_time)    # получаем вектор (график одного из параметров)
 
                     # print("'prod' in parm", 'prod' in parm)
@@ -1345,7 +1340,7 @@ def inf_loader(model, row, vega_api, task) -> Tuple[np.array, bool]:     # Ит�
 
                 for parm in parms:
                     task_fiction = copy.deepcopy(task)  # Создаем фиктивное задание
-                    task_fiction.prediction_years[0] = year
+                    task_fiction.prediction_years[task.prediction_years_iteration] = year
                     line_i = get_rows_by_parms(parm, task_fiction, row, vega_api, model, size_data_time)
 
                     print('parm_target_year', parm)
@@ -1374,7 +1369,7 @@ def inf_loader(model, row, vega_api, task) -> Tuple[np.array, bool]:     # Ит�
 
             for parm in parms:
                 task_fiction = copy.deepcopy(task)  # Создаем фиктивное задание
-                task_fiction.prediction_years[0] = task.prediction_years_secret
+                task_fiction.prediction_years[task.prediction_years_iteration] = task.prediction_years_secret
                 line_i = get_rows_by_parms(parm, task_fiction, row, vega_api, model, size_data_time)
 
                 print('parm_target_year', parm)
@@ -1557,7 +1552,7 @@ def get_raw_years_list(row, task):
     for head in heads:
         try:
             year = int(head)
-            if int(year) <= int(task.prediction_years[0]):
+            if int(year) <= int(task.prediction_years[task.prediction_years_iteration]):
                 years.append(int(year))
         except:
             pass
@@ -1976,7 +1971,7 @@ def predictor(np_array_data_processed, model_class, task, row):        # Зап�
         predicts = []
         for i in range(100):     # Цикл, в котором нейросеть делает несколько предсказаний.
             # Каждый раз они немного отличаются из-за модуля Дропаута
-            np.savetxt("Enter_data.csv", np_array_data_processed)
+            # np.savetxt("Enter_data.csv", np_array_data_processed)
             enter = np_array_data_processed
             enter = enter.reshape(1, 18, -1)
             enter = torch.from_numpy(enter)
@@ -2051,7 +2046,7 @@ def gel_years_list_with_prods(task, row, all_points=False):
             year_i = int(years_list[i])
             prod_i = float(str(row[int(year_i)]).replace(',', '.'))
             if str(prod_i) != 'nan':
-                if year_i < int(task.prediction_years[0]):
+                if year_i < int(task.prediction_years[task.prediction_years_iteration]):
                     years_available.append(year_i)
                     prods_available.append(prod_i)
     else:
@@ -2069,13 +2064,14 @@ def gel_years_list_with_prods(task, row, all_points=False):
         years_available_short = []
         prods_available_short = []
 
-        # counter = 0
+        counter = 0
         for i in range(len(years_available)):
 
-            if int(years_available[i]) < int(task.prediction_years[0]):
-                years_available_short.append(years_available[i])
-                prods_available_short.append(prods_available[i])
-                # counter += 1
+            if int(years_available[i]) < int(task.prediction_years[task.prediction_years_iteration]):
+                if counter <= task.avegage_last:
+                    years_available_short.append(years_available[i])
+                    prods_available_short.append(prods_available[i])
+                    counter += 1
 
         years_available = years_available_short
         prods_available = prods_available_short
@@ -2148,8 +2144,8 @@ def predict_and_correction_real(model, row, vega_api, task):
             print('counter', i)
             year_i = years_available[i]                 # Получаем год
             task_fiction = copy.deepcopy(task)          # Создаем фиктивное задание
-            task_fiction.prediction_years[0] = year_i
-            task_fiction.prediction_years_secret = task.prediction_years[0]
+            task_fiction.prediction_years[task.prediction_years_iteration] = year_i
+            task_fiction.prediction_years_secret = task.prediction_years[task.prediction_years_iteration]
             verdict_i, succses = get_one_verdict(model, row, vega_api, task_fiction)
             print('verdict_i_type', type(verdict_i))
 
@@ -2165,7 +2161,7 @@ def predict_and_correction_real(model, row, vega_api, task):
             predicts_for_past.append(float(verdict_i.verdict))
             print('verdict_i ', verdict_i)
 
-        task.prediction_years_secret = task.prediction_years[0]
+        task.prediction_years_secret = task.prediction_years[task.prediction_years_iteration]
         verdict_bc, succses = get_one_verdict(model, row, vega_api, task)
 
         average = find_average_prod_in_row(row, task)
@@ -2186,7 +2182,7 @@ def predict_and_correction_real(model, row, vega_api, task):
         print('verdict_corrected', verdict_corrected.verdict)
 
     else:
-        task.prediction_years_secret = task.prediction_years[0]
+        task.prediction_years_secret = task.prediction_years[task.prediction_years_iteration]
         verdict_bc, succses = get_one_verdict(model, row, vega_api, task)
         verdict_corrected, average = verdict_bc, find_average_prod_in_row(row, task)
 
@@ -2212,15 +2208,16 @@ def predict_array(row, task) -> Tuple[list, float]:   # Получаем стр�
         years_list_in_row, _ = gel_years_list_with_prods(task, row, all_points=True)    # Получим список годов, для которых у нас имеются продуктивности в обрабатываемой строчке документа
         print('years_list_in_row', years_list_in_row)
         print('len(years_list_in_row)', len(years_list_in_row))
+        print('column_models', column_models)
+        task.prediction_years_iteration = i
 
         if len(years_list_in_row) != 0:
-
             print('Длины ', len(model_list), len(column_models))
             print(model_list, column_models)
             model, model_name = model_list[i], column_models[i]
             model.activate()    # Активируем модель (произойдут предварительные приготовления)
 
-            year = task.prediction_years[0]     # Загрузим год, для которого делается предсказание
+            year = task.prediction_years[task.prediction_years_iteration]     # Загрузим год, для которого делается предсказание
             model_name_in_cap = model_name + '_predict_' + year
             print('model_name_in_cap', model_name_in_cap, 'years', year)
 
@@ -2252,6 +2249,7 @@ def record_additional_information(df_destination, index, answer):
     dict_keys_list = unconditional_dict.keys()
 
     for key in dict_keys_list:
+        print('unconditional_dict[key]', key, unconditional_dict[key])
         df_destination.loc[index, str(key)] = unconditional_dict[key]
 
     additional_dict = answer.additional_inf
@@ -2277,6 +2275,7 @@ def download_and_prediction(task):  # Идет перебор по стокам 
 
     with alive_bar(df_destination.shape[0], force_tty=True) as bar:
         for index, row in df_destination.iterrows():  # Итерации по списку задания
+
             row_predict, average = predict_array(row, task)     # Передаем функции строку и экземпляр класса задания
             print('average', average)
             df_destination.loc[index, 'Average productivity'] = average
