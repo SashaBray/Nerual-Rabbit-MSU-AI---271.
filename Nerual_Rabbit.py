@@ -1,7 +1,13 @@
 import os
+from lib2to3.fixes.fix_tuple_params import find_params
 
 import numpy as np
 import pandas as pd
+from openpyxl.styles.builtins import total
+# from scipy.special import delta
+from scipy.special import beta
+from sympy.physics.units import years
+from torch.utils.hipify.hipify_python import value
 from tqdm import tqdm
 import time
 import alive_progress
@@ -22,7 +28,7 @@ import requests
 import random
 import math
 
-from Library_working_with_time_series import TimeRow, Operations
+from Library_working_with_time_series_v1 import TimeRow, Operations
 
 import pickle
 
@@ -37,15 +43,19 @@ import cProfile
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.datasets import make_regression
 
+from Lib_find_train_example import get_train_example
+from datetime import datetime, date, time
 
 
 class CalculationTask():
     """Класс является носителем информации о расчетном задании"""
     def __init__(self, task_file=None, years=None, prediction_years_iteration = 0, target=None, success=None, directory = 'Destination_files\\'.replace('\\', os.sep),
                  column_predict=None, column_models=None, models_list = None,
-                 task_file_reserw=None, login=None, password=None,
-                 culture=None, years_to_back=None, current_day=None, avegage_last=None, years_for_correct=1,
-                 prediction_years_secret=None, correction=False) -> None:
+                 task_file_reserw=None,
+                 culture=None, years_to_back=None, current_day=None,
+                 current_year=None, total_historical_puding=False,
+                 avegage_last=None, years_for_correct=1,
+                 prediction_years_secret=None, correction=False, directory_time_rows=None, ukey='') -> None:
 
         self.task_file = task_file
         self.prediction_years = years
@@ -53,23 +63,37 @@ class CalculationTask():
         self.target = target
         self.success = success
         self.directory = directory
+        self.directory_time_rows = directory_time_rows
 
         self.column_predict = column_predict
         self.column_models = column_models
         self.models_list = models_list
 
         self.task_file_reserw = task_file_reserw
-
-        self.login = login
-        self.password = password
         self.culture = culture
 
+        day = datetime.now().day
+        month = datetime.now().month
+        year = datetime.now().year
+
+        data_now = date(year, int(month), int(day))
+        data_year_begining = date(year, 1, 1)
+        delta_days = data_now - data_year_begining
+        day_since_the_beginning_of_the_year = delta_days.days
+
+        print('day_since_the_beginning_of_the_year', day_since_the_beginning_of_the_year)
+        # print(hehehe)
+        self.year_now = year
+
         self.years_to_back = years_to_back
-        self.current_day = current_day
+        self.current_day = day_since_the_beginning_of_the_year
+        self.current_year = datetime.now().year
+        self.total_historical_puding = total_historical_puding
         self.avegage_last = avegage_last
         self.years_for_correct = years_for_correct
         self.prediction_years_secret = prediction_years_secret
         self.correction = correction
+        self.ukey = ukey
 
 
 class ModelWrapper():
@@ -98,10 +122,9 @@ class ModelWrapper():
         print('file_parms_way', file_parms_way)
 
         self.parm_file_info = read_inf(file_parms_way.replace(' ', ''))
-        self.prossesing_file_info = read_inf(file_prossesing_way.replace(' ', ''))
-
+        # self.prossesing_file_info = read_inf(file_prossesing_way.replace(' ', '')
         self.parms = self.parm_file_info['parm_list']
-        self.prossesing = self.prossesing_file_info
+        # self.prossesing = self.prossesing_file_info
 
         try:
             self.parms_scalars = self.parm_file_info["scalars"]
@@ -119,9 +142,10 @@ class ModelWrapper():
         print('bool', ('LM' in self.model_name) and not('KML' in self.model_name))
 
         # try:
-        if 'NN_CN' in self.model_name: # self.model_name == 'NN_CN_v1_winter_wheat':
+        if 'NN' in self.model_name: # self.model_name == 'NN_CN_v1_winter_wheat':
             model_file_name = '\\model_scripted.pt'.replace('\\', os.sep)
             model = torch.jit.load(way + model_file_name)
+            model.train()
 
         if 'RF' in self.model_name: # self.model_name == 'RF_v1_winter_wheat':
             # way = 'Service_files\\Models\\'.replace('\\', os.sep) + self.model_name
@@ -139,7 +163,6 @@ class ModelWrapper():
             if 'RF' in self.model_name:
                 model = Pretrained_Random_Forest()
 
-
         if 'EXM' in self.model_name:
             model = Simple_exp_model()
             print('Выбрана простая экспоненциальная модель')
@@ -154,13 +177,13 @@ class ModelWrapper():
             print('Модель успешно активирована!')
 
 
-
 class Answer():
     """Класс ответа. Хранит вердикт и дополнительную информацию, которую нужно вывести в отчет"""
     def __init__(self, verdict: [float], additional_inf={}, inf_unconditional={}):
         self.verdict = verdict
         self.additional_inf = additional_inf
         self.inf_unconditional = inf_unconditional
+
 
 class DataPrepearer():
     """Класс, принимающий на вход данные, полученные на сайте Vega и преобразует их в потребную для модели форму,
@@ -181,9 +204,9 @@ class DataPrepearer():
 
 class VegaAPI():
     """Класс для запроса дынных на сайте Vega-Scince"""
-    def __init__(self, login, password):
-        self.login = login
-        self.password = password
+    def __init__(self):
+        pass
+
 
     def connect(self):
         self.user = ['Mozilla/5.0 (Windows NT 6.3; WOW64; rv:36.0) Gecko/20100101 Firefox/36.0',
@@ -199,28 +222,30 @@ class VegaAPI():
         self.URL = 'http://sci-vega.ru/login/login.pl'
 
             # Логин и пароль
-        Login = 'fki22_SB'
-        Password = 'MAILoveforever2022'
         # Login = self.password
         # Password = self.password
 
-        self.data = {'first': Login, 'second': Password, 'mode': 'in', 'from': '/'}
-        self.response = self.session.post(self.URL, data=self.data, headers=self.header)
+        # self.data = {'first': Login, 'second': Password, 'mode': 'in', 'from': '/'}
+        # self.response = self.session.post(self.URL, data=self.data, headers=self.header)
 
 
-    def district(self, product_type, year, reg_uid):
+    def district(self, product_type, year, reg_uid, ukey):
+
+        ukey = '53616c7465645f5f045ce820ae5fafb3a20051ff0a77a3dfdd9a672ed958772b84e1d5e95b3663eb'
+
         # print(product_type, year, reg_uid, ' Loading in progress...')  # Выводим на экран
         success = False
         try:  # Пробуем запросить данные
             product_type, year, reg_uid = str(product_type), str(year), str(reg_uid)
 
-            Save_graph_link = 'http://sci-vega.ru/geosmis_charts_v2/plot.pl?x_axis_type=time&w=0&h=0&x1=1&x2=366&query=' \
+            Save_graph_link = 'http://sci-vega.ru/geosmis_charts_v2/plot.pl?ukey=' + ukey + '&x_axis_type=time&w=0&h=0&x1=1&x2=366&query=' \
                               +'[{%22c%22:1,%22type%22:%22adm_dis%22,%22uid%22:%22' + reg_uid + '%22,%22rows%22:{%22' \
                               + product_type + '%22:[' + year + ']}}]&mode=basic&num_points=1&highcharts=1&a_week=51&a_year=' \
                               + year + '&label_year=' + year
 
             print('Save_graph_link', Save_graph_link)
-            Graph = self.session.get(Save_graph_link).text
+            # Graph = self.session.get(Save_graph_link).text
+            Graph = requests.get(Save_graph_link).text
             # print('Graph', Graph)
             Result = json.loads(Graph)
             success = True
@@ -228,15 +253,17 @@ class VegaAPI():
         except:  # Ошибка скорее всего значит завершение сессии. Нужно зайти снова и повторить запрос
             try:
                 self.session = requests.Session()
-                self.response = self.session.post(URL, data=data, headers=header)
+                self.response = self.session.post(URL, data=data, headers=header) # 53616c7465645f5f045ce820ae5fafb3a20051ff0a77a3dfdd9a672ed958772b84e1d5e95b3663eb
 
-                Save_graph_link = 'http://sci-vega.ru/geosmis_charts_v2/plot.pl?x_axis_type=time&w=0&h=0&x1=1&x2=366&query=' \
+
+                Save_graph_link = 'http://sci-vega.ru/geosmis_charts_v2/plot.pl?ukey=' + ukey + '&x_axis_type=time&w=0&h=0&x1=1&x2=366&query=' \
                                   + '[{%22c%22:1,%22type%22:%22adm_dis%22,%22uid%22:%22' + reg_uid + '%22,%22rows%22:{%22' \
                                   + product_type + '%22:[' + year + ']}}]&mode=basic&num_points=1&highcharts=1&a_week=51&a_year=' \
                                   + year + '&label_year=' + year
 
                 print('Save_graph_link', Save_graph_link)
-                Graph = self.session.get(Save_graph_link).text
+                # Graph = self.session.get(Save_graph_link).text
+                Graph = requests.get(Save_graph_link).text
                 Result = json.loads(Graph)
                 success = True
 
@@ -246,10 +273,12 @@ class VegaAPI():
 
         return Result, success
 
-    def region(self, product_type, year, reg_uid):
+    def region(self, product_type, year, reg_uid, ukey):
         # print(product_type, year, reg_uid, ' Loading in progress...')  # Выводим на экран
         success = False
         a_week = '51'
+
+        ukey = '53616c7465645f5f045ce820ae5fafb3a20051ff0a77a3dfdd9a672ed958772b84e1d5e95b3663eb'
 
         try:  # Пробуем запросить данные
 
@@ -259,7 +288,7 @@ class VegaAPI():
 
             a_week = '51'
 
-            Save_graph_link = 'http://sci-vega.ru/geosmis_charts_v2/plot.pl?x_axis_type=time&w=0&h=0&x1=1&' \
+            Save_graph_link = 'http://sci-vega.ru/geosmis_charts_v2/plot.pl?ukey=' + ukey + 'x_axis_type=time&w=0&h=0&x1=1&' \
                               + 'x2=366&query=[{%22c%22:1,%22type%22:%22adm_reg%22,%22uid%22:%22' \
                               + reg_uid + '%22,%22rows%22:{%22reg_' + product_type + '%22:[' + year + ']}}]&mode' \
                               + '=basic&num_points=1&highcharts=1&no_cache=34576&a_week=' + a_week \
@@ -269,7 +298,7 @@ class VegaAPI():
             print('Save_graph_link', Save_graph_link)
             # print('type Save_graph_link', type(Save_graph_link))
 
-            Graph = self.session.get(Save_graph_link).text
+            Graph = requests.get(Save_graph_link).text
             # print('Graph', Graph)
             Result = json.loads(Graph)
             success = True
@@ -278,7 +307,7 @@ class VegaAPI():
             try:
                 self.session = requests.Session()
                 self.response = self.session.post(URL, data=data, headers=header)
-                Save_graph_link = 'http://sci-vega.ru/geosmis_charts_v2/plot.pl?x_axis_type=time&w=0&h=0&x1=1&'\
+                Save_graph_link = 'http://sci-vega.ru/geosmis_charts_v2/plot.pl?ukey=' + ukey + '&x_axis_type=time&w=0&h=0&x1=1&'\
                                   + 'x2=366&query=[{%22c%22:1,%22type%22:%22adm_reg%22,%22uid%22:%22'\
                                   + reg_uid + '%22,%22rows%22:{%22reg_' + product_type + '%22:[' + year + ']}}]&mode'\
                                   + '=basic&num_points=1&highcharts=1&no_cache=34576&a_week=' + a_week\
@@ -286,7 +315,8 @@ class VegaAPI():
 
 
                 print('Save_graph_link', Save_graph_link)
-                Graph = self.session.get(Save_graph_link).text
+                # Graph = self.session.get(Save_graph_link).text
+                Graph = requests.get(Save_graph_link).text
                 Result = json.loads(Graph)
                 success = True
 
@@ -297,7 +327,7 @@ class VegaAPI():
         return Result, success
 
 
-def print_metrics(y_true, y_predicted, x_train, answer) -> Answer:
+def print_metrics(y_true, y_predicted, x_train, answer, task, years_available, predicts_for_past) -> Answer:
 
     print('')
     print('true_for_metrics', y_true)
@@ -308,28 +338,45 @@ def print_metrics(y_true, y_predicted, x_train, answer) -> Answer:
     y_predicted = np.array(y_predicted)
     x_shape, y_shape = max(y_true.shape), min(y_true.shape)
 
-    print(f"Mean squared error: {mean_squared_error(y_true, y_predicted):.3f}")
-    print(
-        "Root mean squared error: ",
-        f"{mean_squared_error(y_true, y_predicted, squared=False):.3f}",
-    )
-    print(f"Mean absolute error: {mean_absolute_error(y_true, y_predicted):.3f}")
-    print(f"R2 score: {r2_score(y_true, y_predicted):.3f}")
+    try:
+        print(f"Mean squared error: {mean_squared_error(y_true, y_predicted):.3f}")
+        print(
+            "Root mean squared error: ",
+            f"{mean_squared_error(y_true, y_predicted, squared=False):.3f}",
+        )
+        print(f"Mean absolute error: {mean_absolute_error(y_true, y_predicted):.3f}")
+        print(f"R2 score: {r2_score(y_true, y_predicted):.3f}")
 
-    answer.inf_unconditional.setdefault('R2 score', r2_score(y_true, y_predicted))      # Расчет основных метрик
-    answer.inf_unconditional['R2 score'] = r2_score(y_true, y_predicted)
+    except:
+        print('Ошибка при расчете метрик!')
 
-    answer.inf_unconditional.setdefault('Mean squared error', mean_squared_error(y_true, y_predicted))
-    answer.inf_unconditional['Mean squared error'] = mean_squared_error(y_true, y_predicted)
+    try:
+        answer.inf_unconditional.setdefault('R2 score', r2_score(y_true, y_predicted))      # Расчет основных метрик
+        answer.inf_unconditional['R2 score'] = r2_score(y_true, y_predicted)
+    except:
+        print('Ошибка при расчете коэффициента детерминации!')
+    try:
+        answer.inf_unconditional.setdefault('Mean squared error', mean_squared_error(y_true, y_predicted))
+        answer.inf_unconditional['Mean squared error'] = mean_squared_error(y_true, y_predicted)
+    except:
+        print('Ошибка при расчете СКО!')
+    try:
+        answer.inf_unconditional.setdefault('Root mean squared error', mean_squared_error(y_true, y_predicted, squared=False))
+        answer.inf_unconditional['Root mean squared error'] = mean_squared_error(y_true, y_predicted, squared=False)
+    except:
+        print('Ошибка при расчете корня из СКО')
 
-    answer.inf_unconditional.setdefault('Root mean squared error', mean_squared_error(y_true, y_predicted, squared=False))
-    answer.inf_unconditional['Root mean squared error'] = mean_squared_error(y_true, y_predicted, squared=False)
+    try:
+        answer.inf_unconditional.setdefault('Max absolute error', abs(y_true.reshape(-1, x_shape) - y_predicted.reshape(-1, x_shape)).max())
+        answer.inf_unconditional['Max absolute error'] = abs(y_true.reshape(-1, x_shape) - y_predicted.reshape(-1, x_shape)).max()
+    except:
+        print('Ошибка при расчете максимальной ошибки!')
 
-    answer.inf_unconditional.setdefault('Max absolute error', abs(y_true.reshape(-1, x_shape) - y_predicted.reshape(-1, x_shape)).max())
-    answer.inf_unconditional['Max absolute error'] = abs(y_true.reshape(-1, x_shape) - y_predicted.reshape(-1, x_shape)).max()
-
-    answer.inf_unconditional.setdefault('Mean absolute error', mean_absolute_error(y_true, y_predicted))
-    answer.inf_unconditional['Mean absolute error'] = mean_absolute_error(y_true, y_predicted)
+    try:
+        answer.inf_unconditional.setdefault('Mean absolute error', mean_absolute_error(y_true, y_predicted))
+        answer.inf_unconditional['Mean absolute error'] = mean_absolute_error(y_true, y_predicted)
+    except:
+        print('Ошибка при расчете MAE!')
 
     try:       # Расчет и запись коэффициента корреляции
         print('Расчет и запись коэффициента корреляции', y_true, y_predicted)
@@ -452,7 +499,7 @@ def get_regression_line_for_graph(ndvi, prod, regressor):
     regression_points = []
     for i in range(len(points)):
         point = np.array(points[i]).reshape(1, -1)
-        regression_point_i = regressor.predict(point).reshape(1)
+        regression_point_i = np.exp(regressor.predict(point)).reshape(1)
         regression_points.append(regression_point_i)
 
     print('regression_points', regression_points)
@@ -488,14 +535,14 @@ def create_years_ndvi_point_graphic(data, task, row, regressor, way, file_name, 
 
     plt.figure(figsize=(10, 6))  # Гарфик линейной регрессии
     plt.scatter(x, y, label=' NDVI ', color='blue')
-    plt.plot(points_arg, points_regression, label=' Линейная регрессия ', color='darkred')
+    plt.plot(points_arg, points_regression, label=' Экспоненциальная регрессия ', color='darkred')
     plt.xlabel('NDVI max', size=11)
     plt.ylabel('Урожайность (ц/га) ', size=11)
 
     if str(row['district']) == 'nan':
-        plt.title('Линейная регрессия: ' + row['region'] , size=14)
+        plt.title('Экспоненциальная: ' + row['region'] , size=14)
     else:
-        plt.title('Линейная регрессия: ' + row['region'] + ' - ' + row['district'], size=14)
+        plt.title('Экспоненциальная: ' + row['region'] + ' - ' + row['district'], size=14)
     plt.grid(True)
 
     if vector:
@@ -570,11 +617,23 @@ class Simple_linear_model():
             # print('y_train', y_train.shape)
             # print('x_target_scaled', x_target_scaled.shape)
 
-            regressor = LinearRegression()
-            regressor.fit(x_train_scaled, y_train)
+            print('Изнач y', y_train)
+            y_train_ln = np.log(y_train)
+            print('Логарифм y', y_train_ln)
 
-            y_pred_s = regressor.predict(x_target_scaled)
-            y_pred = regressor.predict(x_train_scaled)
+            regressor = LinearRegression()
+            regressor.fit(x_train_scaled, y_train_ln)
+
+            y_pred_s_ln = regressor.predict(x_target_scaled)
+            y_pred_ln = regressor.predict(x_train_scaled)
+
+            y_pred_s = np.exp(y_pred_s_ln)
+            y_pred = np.exp(y_pred_ln)
+
+            print('y_pred_s', y_pred_s)
+            print('y_pred', y_pred)
+
+            # print(heheh)
 
             print('argument', x_target_scaled)
             print('answer', y_pred_s)
@@ -583,7 +642,10 @@ class Simple_linear_model():
 
             answer = Answer(verdict=y_pred_s)
 
-            answer = print_metrics(y_train, y_pred, x_train_scaled, answer)
+            years_available = gel_years_list_with_prods(task, row, all_points=True)
+            predicts_for_past = y_pred
+
+            answer = print_metrics(y_train, y_pred, x_train_scaled, answer, task, years_available, predicts_for_past)
             answer = print_settlement_information(answer, data, x_target_scaled, task)
 
             make_graphs_to_illustrate_simple_linear_model(row, regressor, task, data)
@@ -651,6 +713,7 @@ class Complex_linear_model():
         print('y_train', y_train)
 
         y_pred_s = target_mean + y_pred_s * target_mean
+
 
         answer = Answer(verdict=y_pred_s)       # Инициализируем экземпляр класса Ответ
         answer = print_metrics(y_train, y_pred, None, answer)     # Прикладываем к ответу дополнительную информацию
@@ -763,15 +826,19 @@ def сonduct_user_survey():
             print('Команда не распознана...', '\n')
     return task
 
-
 def fast_user_survey():
     """Инициализация экземпляра класса задания с указанием расчетного файла"""
-    task = CalculationTask(task_file='Destination template.xlsx', login='fki22_SB',
-                            password='MAILoveforever2022', culture='озимая пшеница',
-                           years_to_back=7, current_day=171, avegage_last=5,
-                           years_for_correct=4, correction=False)
-    return task
+    task = CalculationTask(
+                           task_file='Destination template test.xlsx',
+                           #  task_file='Destination template_Amur_Soy_2018_2024_last_SLM.xlsx',
 
+                           culture=None,
+                           years_to_back=4, current_day=290, current_year=2024,
+                           total_historical_puding=False, avegage_last=4,
+                           years_for_correct=1, correction=False,
+                           directory_time_rows='Temporary_information\\TimeRows\\'.replace('\\', os.sep))
+
+    return task
 
 def get_models_list(df_destination) -> list:
     """Получение списка моделей, упомянутых в файле"""
@@ -820,6 +887,10 @@ def destination_analysis(task):
     task.column_predict, task.column_models, task.prediction_years = get_models_list(df_destination)    # Вычитываем в файле указанные модели
 
     task = make_reserw_copy_destination(task)      # Создаем резервную копию на всякий случай
+
+    # print('df_destination', df_destination)
+    # print("df_destination['culture']", df_destination['culture'].values[0])
+    # print(heheh)
 
     return task
 
@@ -877,7 +948,6 @@ def chek_file(parm, row, task):           # Потом допишу...
         file = read_inf(way + file_name)
         try:
             open_file_for_chek = file['data']['1']['xy'][0]
-
             return True
         except:
             return False
@@ -912,7 +982,7 @@ def read(parm, row, task, time_rows_size=365):
 
     time_data, _ = TimeRow(directory + file_name).get_array_by_size(my_size=time_rows_size,
                                                                     # Открытие файла и приведение к нужному размеру
-                                                                    padding='closest_value')
+                                                                    padding='zeros')
 
     return time_data
 
@@ -931,7 +1001,11 @@ def vega_product(parm: str, ndvi: bool, historical: bool, model, task, row) -> s
     if ndvi:    # Загрузка маски ndvi из файла в зависимости от культуры
         res_ndvi = pd_file[(pd_file['id_region'].astype(str).str.contains(str(reg_uid)))]
 
+        culture = row['culture'].lower()
+
         print('res_ndvi', res_ndvi)
+        print('culture', culture)
+        print('res_ndvi[culture]', res_ndvi[culture])
 
         mask = res_ndvi[culture].values[0]
 
@@ -1001,11 +1075,11 @@ def find_in_vega(parm, row, vega_api, model, task, make_file=True, hist=False):
     print('district_uid', district_uid, 'reg_uid', reg_uid)
 
     if str(district_uid) == 'nan':
-        json, success = vega_api.region(veg_prod, year, reg_uid)
+        json, success = vega_api.region(veg_prod, year, reg_uid, task.ukey)
         file_name, directory = write_time_row_json(json, row, task, parm, hist=hist)
 
     else:
-        json, success = vega_api.district(veg_prod, year, district_uid)
+        json, success = vega_api.district(veg_prod, year, district_uid, task.ukey)
         file_name, directory = write_time_row_json(json, row, task, parm, hist=hist)
 
     return json, veg_prod, success, file_name, directory
@@ -1028,7 +1102,7 @@ def get_not_hist_row(parm, row, vega_api, model, task,          # Функция
     # print(json)
     print('directory + file_name', directory + file_name)
     time_data, _ = TimeRow(directory + file_name).get_array_by_size(my_size=time_rows_size, # Открытие файла и приведение к нужному размеру
-                                                                    padding='closest_value')
+                                                                    padding='zeros')
 
     return time_data, file_name, directory
 
@@ -1091,9 +1165,11 @@ def get_hist_row(parm, row, vega_api, model, task, directory='Temporary_informat
 
     print('Активируется класс поиска среднего')
 
+    print('product', parm, 'dist_id', id_dist, 'file_name', file_name, 'size', time_rows_size, 'directory', directory)
+
     op = Operations()
     time_data, _ = op.mean_in_district(product=parm, dist_id=id_dist, file_name=file_name,
-                                       size=time_rows_size, directory=directory, padding='closest_value')
+                                       size=time_rows_size, directory=directory, padding='zeros')
 
     return time_data, file_name, directory
 
@@ -1132,7 +1208,11 @@ def get_new_line_timerow(parm, task, row, model, vega_api, df_new_matrix):
     file_success = chek_file(parm, row, task)  # Если файл уже есть на компе, он будет загружен
     print('file_success', file_success)
 
-    if file_success:
+    print('file_success and task.prediction_years_secret<task.year_now', file_success and task.prediction_years_secret<task.year_now)
+
+    # print(hohoh)
+
+    if file_success and task.prediction_years_secret<task.year_now:
         time_row_parm = read(parm, row, task)
 
     else:  # Если нет, информация будет найдена в интернете
@@ -1152,6 +1232,35 @@ def get_new_line_timerow(parm, task, row, model, vega_api, df_new_matrix):
             df_new_matrix = np.vstack([df_new_matrix, [time_row_parm]])
 
     return df_new_matrix
+
+
+def find_params_of_statistic(parms):
+    keywords = ['mean_prod',
+                'prod',
+                'mean_productive',
+                'productive',
+                'dispersion',
+                'disp',
+                'trend',
+                'mean_trend',
+                'mean_trend']
+    list_params_of_statistic = []
+
+    # print('hoho')
+
+    for parm in parms:
+        find = False
+        for key in keywords:
+            print(parm, key)
+            if parm.lower() == key.lower():
+                find = True
+
+        if find:
+            list_params_of_statistic.append(parm)
+
+    print('list_params_of_statistic', list_params_of_statistic)
+
+    return list_params_of_statistic
 
 
 def get_raw_years_and_prods(row, task, all_years=False, including_current=False) -> tuple:
@@ -1217,10 +1326,20 @@ def find_average_trend_of_prod_in_row(row, task) -> float:
 
     return trend
 
+def find_dispersion_of_prod_in_row(row, task):  # Функция, рассчитывающая дисперсию, нормированную на среднюю урожайность
+    list_of_years, list_of_prods = gel_years_list_with_prods(task, row, all_points=False)
+    list_of_productive_np = np.array(list_of_prods)
+    mean_productive = list_of_productive_np.mean()
+    prod_disperssion = np.var(list_of_productive_np)
+    prod_disperssion_norm = prod_disperssion / mean_productive
+
+    return prod_disperssion_norm
+
 def get_rows_by_parms(parm, task, row, vega_api, model, size_data_time):
 
-    if not (('prod' in parm) or (
-            'trend' in parm)):  # Если параметр не является характеристикой статистики...
+    print('("disp" in parm)', ('disp' in parm))
+
+    if not (('prod' in parm) or ('trend' in parm) or ('disp' in parm)):  # Если параметр не является характеристикой статистики...
 
         print('parm', parm, 'year', task.prediction_years)
         file_success = chek_file(parm, row, task)  # Если файл уже есть на компе, он будет загружен
@@ -1245,9 +1364,101 @@ def get_rows_by_parms(parm, task, row, vega_api, model, size_data_time):
         time_row_parm = ones_line * mean_trend  # Добавлена строка со средней продуктивностью
         pass
 
+    elif 'dispersion' in parm:
+        dispersion = find_dispersion_of_prod_in_row(row, task)
+        ones_line = np.ones(size_data_time)
+        time_row_parm = ones_line * dispersion  # Добавлена строка со средней продуктивностью
+
+        pass
+
     return time_row_parm
 
 
+def get_stat_parm_by_row(row, parm_of_statistic, average_last, predict_year):
+    years_init = list(row.index)
+    # print('years', years)
+    years_init.sort()
+    years_init.reverse()
+    # print('years.sort()', years_init)
+    years_in_attention = []
+    prod_in_attentoin = []
+    counter = 0
+
+    for year in years_init:
+        if counter < average_last+1:
+            prod_i = row[year]
+            year_i = year
+            if (str(prod_i) != 'nan') and (str(year_i) != 'nan') and (int(year_i) < int(predict_year)):
+                prod_in_attentoin.append(float(str(prod_i).replace(',', '.')))
+                years_in_attention.append(int(year_i))
+                counter += 1
+
+    years_in_attention.reverse()
+    prod_in_attentoin.reverse()
+
+    print('predict_year', predict_year)
+    print('years_in_attention', years_in_attention)
+    print('prod_in_attentoin', prod_in_attentoin)
+
+    if 'prod' in parm_of_statistic:
+        mean_productive = np.array(prod_in_attentoin).mean()
+        parm_of_statistic_value = float(mean_productive)
+    elif 'disp' in parm_of_statistic:
+        mean_productive = np.array(prod_in_attentoin).mean()
+        list_of_productive_np = np.array(prod_in_attentoin)
+        prod_disperssion = np.var(list_of_productive_np)
+        prod_disperssion_norm = prod_disperssion / mean_productive
+        try:
+            parm_of_statistic_value = float(prod_disperssion_norm)
+        except:
+            parm_of_statistic_value = 0.43
+    elif 'trend' in parm_of_statistic:
+
+        trend_i, shift_i = get_trend_parms(years_in_attention, prod_in_attentoin)
+        try:
+            parm_of_statistic_value = float(trend_i)
+        except:
+            parm_of_statistic_value = 0
+
+    return parm_of_statistic_value
+
+
+def get_train_example_stat(df_new_matrix,
+                           year,
+                           row,
+                           parms,
+                           parms_of_statistic,
+                           average_last):
+    """Функция принимает на вход матрицу с временными рядами, строку из задания и
+    добавляет в эту матрицу статистические параметры, которые указанные в списке"""
+
+    matrix = np.array([])
+
+    i, j = 0, 0
+    for parm in parms:
+        if parm in parms_of_statistic:
+            value_of_parm_i = get_stat_parm_by_row(row, parm, average_last, year)
+            print('** year', year, 'parm', parm, value_of_parm_i)
+
+            new_line = value_of_parm_i * np.ones(df_new_matrix.shape[1])
+            j += 1
+            # print('*')
+            # print('new_line', new_line)
+        else:
+            new_line = df_new_matrix[i]
+            i += 1
+            # print('**')
+
+        if matrix.shape[0] == 0:  # Набор нового тензора
+            matrix = np.array([new_line])
+        else:
+            matrix = np.vstack([matrix, [new_line]])
+            # print('***')
+
+    # print(hoho)
+    # print('matrix', matrix.shape)
+
+    return matrix
 
 
 def inf_loader(model, row, vega_api, task) -> Tuple[np.array, bool]:     # Итерирование по параметрам и формирование таблицы входных данных.
@@ -1295,7 +1506,6 @@ def inf_loader(model, row, vega_api, task) -> Tuple[np.array, bool]:     # Ит�
         print('years', years)
         print('prods', prods)
 
-
         for i in range(len(years)):     # итерации по годам и урожайностям
             year = years[i]
             prod = prods[i]
@@ -1311,6 +1521,13 @@ def inf_loader(model, row, vega_api, task) -> Tuple[np.array, bool]:     # Ит�
                 prod_list.append(prod)
 
                 print('parms', parms)
+
+                parm = 'mean_prod'
+                task_fiction = copy.deepcopy(task)  # Создаем фиктивное задание
+                task_fiction.prediction_years[task.prediction_years_iteration] = task.prediction_years_secret
+                line_i = get_rows_by_parms(parm, task_fiction, row, vega_api, model, size_data_time)
+                if 'prod' in parm:  # Если параметр = продуктивность, запишем его в отдельную переменную, которую потом приложим к словарю с данными для расчетов.
+                    mean_prods_list.append(line_i[0])
 
                 for parm in parms:  # итерации по параметрам
                     """Создаем фиктивное задание (копия экземпляра класса с заданием, 
@@ -1367,6 +1584,14 @@ def inf_loader(model, row, vega_api, task) -> Tuple[np.array, bool]:     # Ит�
             years_in_df.append(task.prediction_years_secret)
             print('parms_target_year', parms)
 
+            parm = 'mean_prod'
+            task_fiction = copy.deepcopy(task)  # Создаем фиктивное задание
+            task_fiction.prediction_years[task.prediction_years_iteration] = task.prediction_years_secret
+            line_i = get_rows_by_parms(parm, task_fiction, row, vega_api, model, size_data_time)
+            if 'prod' in parm:
+                print('target_mean_prod = line_i[0] +')
+                target_mean_prod = line_i[0]
+
             for parm in parms:
                 task_fiction = copy.deepcopy(task)  # Создаем фиктивное задание
                 task_fiction.prediction_years[task.prediction_years_iteration] = task.prediction_years_secret
@@ -1416,59 +1641,74 @@ def inf_loader(model, row, vega_api, task) -> Tuple[np.array, bool]:     # Ит�
         # print(heheh)
 
     else:
-        for parm in parms:          # Если речь о нелинейной модели
-            print('parn in progress', parm)
+        year = task.prediction_years[task.prediction_years_iteration]
+        list_of_parms = parms
+        parms_of_statistic = find_params_of_statistic(parms)
+        pd_file = model.pd_masks
+        range_of_row = model.parm_file_info["time_borders"]
+        directory = task.directory_time_rows # путь к папке, где хранятся файлы с временными рядами
+        culture = row['culture'].lower()
+        average_last = task.avegage_last
 
-            try:
-                size_data_time = matrix_norm_cut.shape[1]
-            except:
-                size_data_time = 365    # Использовать стандартный размер ряда
+        try:
+            id_district = int(row['id_district'])
+        except:
+            id_district = 'nan'
+            print('В задании не указан id района! Будет загружена информация регионального уровня.')
+        id_region = int(row['id_region'])
 
-            if not(('prod' in parm) or ('trend' in parm)):  # Если параметр не является характеристикой статистики...
+        print('New library is on!')
+        print('parms', parms)
+        print('parms_of_statistic', parms_of_statistic)
+        print('year', year)
+        print('list_of_parms', list_of_parms)
+        print('pd_file', pd_file)
+        print('range_of_row', range_of_row)
+        print('directory', directory)
+        print('culture', culture)
+        print('average_last', average_last)
+        print('id_district')
+        print('id_region')
 
-                print('parm', parm, 'year', task.prediction_years)
-                file_success = chek_file(parm, row, task)  # Если файл уже есть на компе, он будет загружен
-                print('file_success', file_success)
+        df_new_matrix = get_train_example(year,   # 2015
+                                    id_district,   # 1575
+                                    id_region, # 64
+                                    list_of_parms,  # Список продуктов веги
+                                    parms_of_statistic,  # Параметры, отражающие статистику. Их программа игнорирует.
+                                    pd_file,    # Файл с масками ndvi
+                                    range_of_row,   # диапазон дней
+                                    directory,  # путь к папке, где хранятся файлы с временными рядами
+                                    culture,    # имя культуры
+                                    average_last,
+                                    task.ukey)
 
-                if file_success:
-                    time_row_parm = read(parm, row, task)
+        years = get_raw_years_list(row, task)
+        print('years', years)
+        row_years_only = row[years]
+        print('row_years_only', row_years_only )
 
-                else:   # Если нет, информация будет найдена в интернете
-                    vega_api.connect()
-                    time_row_parm = find_information(parm, model, row, vega_api, task)
+        df_new_matrix = get_train_example_stat(df_new_matrix,
+                                               year,
+                                               row_years_only,
+                                               parms,
+                                               parms_of_statistic,
+                                               average_last
+                                               )
 
-                print('time_row_parm.shape', time_row_parm.shape)
-                print('parm', parm)
-                # print('df_new_matrix', df_new_matrix)
-                print('df_new_matrix.shape', df_new_matrix.shape)
+        get_example = df_new_matrix
 
+        print('parms', parms)
+        print('parms_of_statistic', parms_of_statistic)
 
-            if not(('LM' in model.model_name) or ('EXM' in model.model_name)):  # Если речь не идет о линейных моделях
+        print('df_new_matrix.shape', df_new_matrix.shape)
 
-                if 'prod' in parm:         # Добавляем в матрицу строку с продуктивностью
-                    mean_productive = find_average_prod_in_row(row, task)
-                    ones_line = np.ones(size_data_time)
-                    time_row_parm = ones_line * mean_productive  # Добавлена строка со средней продуктивностью
-                    pass
+        # print(hoho)
 
-                elif 'trend' in parm:             # Добавляем в матрицу строку с трендом
-                    mean_trend = find_average_trend_of_prod_in_row(row, task)
-                    ones_line = np.ones(size_data_time)
-                    time_row_parm = ones_line * mean_trend  # Добавлена строка со средней продуктивностью
-                    pass
+        # for i in range(get_example.shape[0]):
+        #     print(list_of_parms[i], get_example[i].shape, get_example[i])
+        #     plt.plot(get_example[i])
+        #     plt.show()
 
-            if time_row_parm.shape[0] == 0:    # Если матрица пустая,
-                df_new_matrix, success = None, False
-            else:
-                if df_new_matrix.shape[0] == 0:     # Происходит набор строк в одну матрицу
-                    df_new_matrix = np.array([time_row_parm])
-                else:
-                    df_new_matrix = np.vstack([df_new_matrix, [time_row_parm]])
-
-    # print('np_array_data.shape', df_new_matrix.shape)
-    # print('')
-    # print('np_array_data', df_new_matrix)
-    # print('')
 
     return df_new_matrix, success
 
@@ -1574,6 +1814,8 @@ def get_raw_prod_list(row, years_list, task):
     for j in range(len(years_list)):
         year_i = years_list[-j-1]
         prod_i = row[int(year_i)]
+
+        print('int(year_now) > int(year_i)', year_now, year_i)
 
         if int(year_now) > int(year_i):
             if i < task.avegage_last:
@@ -1911,6 +2153,10 @@ def inf_processor(matrix, model, task, row):  # Предварительная �
     last_day = model.last_day
     normalization_parms = model.normalization_parms
 
+    if first_day<0 or last_day<0:
+        first_day += 365
+        last_day +=365
+
     print('model.model_name', model.model_name)
 
     if ('LM' in model.model_name) or ('EXM' in model.model_name):
@@ -1938,7 +2184,7 @@ def inf_processor(matrix, model, task, row):  # Предварительная �
     print('model.model_name', model.model_name)
     print('mean_productive', mean_productive)
 
-    if 'NN_CN' in model.model_name: # model.model_name == 'NN_CN_v1_winter_wheat':
+    if 'NN' in model.model_name: # model.model_name == 'NN_CN_v1_winter_wheat':
         # np_array_data_processed = NN_CN_v1_winter_wheat_prepeaer(matrix_norm_cut, model, task, mean_productive)
         np_array_data_processed = matrix_norm_cut
         pass
@@ -1966,14 +2212,24 @@ def predictor(np_array_data_processed, model_class, task, row):        # Зап�
 
     model_name = model_class.model_name
     model = model_class.model
+    mode_enter_shape = len(model_class.parms)
 
-    if 'NN_CN' in model_name:   #model_name == 'NN_CN_v1_winter_wheat':
+    if 'NN' in model_name:   #model_name == 'NN_CN_v1_winter_wheat':
+
+        # np.savetxt("Enter_matrix.csv", np_array_data_processed)
+
+        get_example = np_array_data_processed
+        # for i in range(get_example.shape[0]):
+        #     # print(list_of_parms[i], get_example[i].shape, get_example[i])
+        #     plt.plot(get_example[i])
+        #     plt.show()
+
         predicts = []
         for i in range(100):     # Цикл, в котором нейросеть делает несколько предсказаний.
             # Каждый раз они немного отличаются из-за модуля Дропаута
             # np.savetxt("Enter_data.csv", np_array_data_processed)
             enter = np_array_data_processed
-            enter = enter.reshape(1, 18, -1)
+            enter = enter.reshape(1, mode_enter_shape, -1)
             enter = torch.from_numpy(enter)
             enter = enter.to(torch.float32)
             prediction = model(enter)
@@ -1996,12 +2252,182 @@ def predictor(np_array_data_processed, model_class, task, row):        # Зап�
 
     if 'KML' in model_name:
         # print('np_array_data_processed_LM', np_array_data_processed)
-        verdict = model.predict(np_array_data_processed, task, row)
+        try:
+            verdict = model.predict(np_array_data_processed, task, row)
+        except:
+            print("При обучении KML произошла неизвестная ошибка!")
+            verdict = Answer(verdict=None)
 
     print('verdict', verdict)
     success = True
 
     return verdict, success
+
+
+def generate_probable_future_matrix(np_array_data,
+                                    prediction_year,
+                                    day_now,
+                                    year_now,
+                                    total_padding,
+                                    list_of_parms,
+                                    parms_of_statistic,
+                                    first_day,
+                                    last_day,
+                                    row,
+                                    model, task):
+    """Функция перебирает строчки матрицы и исправляет их, если там не хватает данных"""
+    print('list_of_parms', list_of_parms)
+    print('длина списка параметров', len(list_of_parms))
+    print('длина матрицы', np_array_data.shape)
+
+    for i in range(np_array_data.shape[0]):
+        print('range_i', i)
+
+    print('np_array_data[18]', np_array_data[18])
+    print('list_of_parms[18]', list_of_parms[18])
+
+    # print(hahah)
+
+    for i in range(np_array_data.shape[0]):
+        print('range_i', i)
+        init_line = np_array_data[i]
+        print('list_of_parms', list_of_parms)
+        parm_name = list_of_parms[i]
+        if not('hist' in parm_name) and not(parm_name in parms_of_statistic):
+            year = prediction_year - 1
+            try:
+                id_district = int(row['id_district'])
+            except:
+                id_district = 'nan'
+            id_region = int(row['id_region'])
+            parms = [parm_name + '_historical']
+            statistic = []
+            pd_file =  model.pd_masks
+            range_of_row = model.parm_file_info["time_borders"]
+            directory = task.directory_time_rows
+            culture = row['culture'].lower()
+            average_last = task.avegage_last
+
+            historical_line = get_train_example(year,   # 2015
+                                    id_district,   # 1575
+                                    id_region, # 64
+                                    parms,  # Список продуктов веги
+                                    statistic,  # Параметры, отражающие статистику. Их программа игнорирует.
+                                    pd_file,    # Файл с масками ndvi
+                                    range_of_row,   # диапазон дней
+                                    directory,  # путь к папке, где хранятся файлы с временными рядами
+                                    culture,    # имя культуры
+                                    average_last,
+                                    ukey=task.ukey
+                                                )
+
+            historical_line = historical_line[0]
+
+            # if first_day < 0 or last_day < 0:
+            #     first_day += 365
+            #     last_day += 365
+            #     day_now += 365  # Текущий день должен быть указан в задании с учетом знака
+            #     # (Знак минус означает, что день соответсвует прошлому году)
+
+            print('day_now', day_now)
+            print('init_line.shape', init_line.shape)
+            print('historical_line.shape', historical_line.shape)
+
+            part_one = init_line[0:day_now]
+            part_second = historical_line[day_now:historical_line.shape[0]]
+            new_line = np.concatenate((part_one, part_second), axis=0)
+
+            np_array_data[i] = new_line
+
+            # print(hehehe)
+
+    return np_array_data
+
+
+def inf_processor_good_hope(np_array_data, model, task, row):
+    """Функция принимает текущую дату (момент, когда делается прогноз) и в случае, если еще не все данные для
+    расчетов известны, программа дозаполняет их историческими данными"""
+
+    prediction_year = int(task.prediction_years[task.prediction_years_iteration])
+    day_now = int(task.current_day)
+    year_now = int(task.current_year)
+    total_padding = task.total_historical_puding
+    list_of_parms = model.parms
+    parms_of_statistic = find_params_of_statistic(list_of_parms)
+    first_day = int(model.first_day)
+    last_day = int(model.last_day)
+
+
+
+
+    if ('NN' in model.model_name)  or ('RF' in model.model_name):
+        get_example = np_array_data
+        # for i in range(get_example.shape[0]):
+        #     # print(list_of_parms[i], get_example[i].shape, get_example[i])
+        #     plt.plot(get_example[i])
+        #     plt.show()
+
+        if year_now < prediction_year:
+            day_now_from_beggining = day_now
+        else:
+            day_now_from_beggining = day_now+365
+
+        print('hope - функция работает')
+        print('prediction_year', prediction_year)
+        print('day_now', day_now)
+        print('year_now', year_now)
+        print('total_padding', total_padding)
+        print('list_of_parms', list_of_parms)
+        print('first_day', first_day)
+        print('last_day', last_day)
+        print('day_now_from_beggining', day_now_from_beggining)
+        print('last_day - first_day', last_day - first_day)
+
+        # print(hehehe)
+
+        if prediction_year-task.year_now >= 1:
+            delta_year_now = 2
+        else:
+            delta_year_now = 1
+
+
+
+        """Условие начала исправления матрицы"""
+        print('hope', total_padding or ((year_now <= prediction_year) and
+                             (day_now_from_beggining < (last_day - first_day))))
+
+
+        if total_padding or ((year_now <= prediction_year) and
+                             (day_now_from_beggining < (last_day - first_day))):
+            print('Начала процедура дозаполнения данных для заблаговременного прогноза!')
+
+            np_array_data = generate_probable_future_matrix(np_array_data,
+                                                            prediction_year,
+                                                            day_now_from_beggining,
+                                                            year_now-delta_year_now,
+                                                            total_padding,
+                                                            list_of_parms,
+                                                            parms_of_statistic,
+                                                            first_day,
+                                                            last_day, row,
+                                                            model, task)
+
+        np_array_data_processed = np_array_data
+        pass
+
+    else:
+        np_array_data_processed = np_array_data
+
+    get_example = np_array_data
+    # for i in range(get_example.shape[0]):
+    #     # print(list_of_parms[i], get_example[i].shape, get_example[i])
+    #     plt.plot(get_example[i])
+    #     plt.show()
+
+    # print(heh)
+
+    success = True
+    return np_array_data_processed, success
 
 
 def get_one_verdict(model, row, vega_api, task) -> Tuple[Answer, bool]:
@@ -2012,10 +2438,20 @@ def get_one_verdict(model, row, vega_api, task) -> Tuple[Answer, bool]:
         np_array_data, success = inf_loader(model, row, vega_api, task)  # Скачиваем информацию
     else:
         verdict = 'unexpected error'  # Если случится ошибка, система вернет комментарий ошибки вместо вердикта
+
+    if success:
+        print('Before Hope')
+        np_array_data_processed, success = inf_processor_good_hope(np_array_data, model, task, row)
+        """Данная функция должна дозаполнить отсутствующие временнные ряды средними историческими данными
+         в том случае, если прогноз делается сильно заблаговременно"""
+    else:
+        verdict = 'inf loader error'
+
     if success:
         np_array_data_processed, success, average = inf_processor(np_array_data, model, task, row)  # Производим предварительную подготовку
     else:
         verdict = 'inf loader error'
+
     if success:
         # print('np_array_data_processed', np_array_data_processed, model.model_name)
         verdict, success = predictor(np_array_data_processed, model, task, row)  # Запуск модели, сохранение прогноза
@@ -2036,8 +2472,7 @@ def gel_years_list_with_prods(task, row, all_points=False):
     years_available = []
     prods_available = []
 
-    # print('row', row)
-
+    print('row', row)
     print('task.avegage_last', task.avegage_last)
     print('all_points', all_points)
 
@@ -2046,7 +2481,7 @@ def gel_years_list_with_prods(task, row, all_points=False):
             year_i = int(years_list[i])
             prod_i = float(str(row[int(year_i)]).replace(',', '.'))
             if str(prod_i) != 'nan':
-                if year_i < int(task.prediction_years[task.prediction_years_iteration]):
+                if year_i <= int(task.prediction_years[task.prediction_years_iteration]):
                     years_available.append(year_i)
                     prods_available.append(prod_i)
     else:
@@ -2116,7 +2551,27 @@ def verdict_normalization(prods_available, predicts_for_past, verdict_bc):      
 
     predicts_for_past_corrected = predicts_for_past_corrected[0:predicts_for_past_corrected.shape[0]-1]
 
+
     return preds_norm_shift[-1], predicts_for_past_corrected
+
+
+def verdict_normalization_v2(prods_available, predicts_for_past, verdict_bc):  # Происходит нормировка вердикта.
+
+    prods_available = np.array(prods_available).reshape(-1,1)
+    predicts_for_past = np.array(predicts_for_past).reshape(-1,1)
+    verdict_bc = np.array(verdict_bc).reshape(-1,1)
+
+    # plt.plot(prods_available, predicts_for_past)  # черные ромбы
+    # plt.show()
+
+    regressor = LinearRegression()      # Инициализируем модель
+    # regressor = RandomForestRegressor()
+    regressor.fit(predicts_for_past, prods_available)    # Обучаем модель
+
+    verdict_norm = float(regressor.predict(verdict_bc))
+    predicts_for_past_corrected = regressor.predict(predicts_for_past)
+
+    return verdict_norm, predicts_for_past_corrected
 
 
 def predict_and_correction_real(model, row, vega_api, task):
@@ -2131,26 +2586,28 @@ def predict_and_correction_real(model, row, vega_api, task):
 
     predicts_for_past = []
 
-    print('task.years_to_back', task.years_to_back)
-    print('years_available', years_available)
+    if task.correction and (not('M' in model.model_name)):     # Для линейных моделей коррекция не предполагается
 
-    if task.correction and (not ('M' in model.model_name)):     # Для линейных моделей коррекция не предполагается
+        task.prediction_years_secret = task.prediction_years[task.prediction_years_iteration]
+        verdict_bc, succses = get_one_verdict(model, row, vega_api, task)
+        average = find_average_prod_in_row(row, task)
 
         years_for_correct_avalible = min(task.years_for_correct, len(years_available))
+        print('task.years_for_correct, len(years_available)', task.years_for_correct, len(years_available))
+        print('year', task.prediction_years_secret)
+        print('years_for_correct_avalible', years_for_correct_avalible)
+
+        print('Год предсказания', task.prediction_years[task.prediction_years_iteration])
 
         # for i in range(task.years_for_correct):       # Делаем предсказания на N прошлых доступных лет
         for i in range(years_for_correct_avalible):  # Делаем предсказания на N прошлых доступных лет
 
             print('counter', i)
             year_i = years_available[i]                 # Получаем год
-            task_fiction = copy.deepcopy(task)          # Создаем фиктивное задание
+            task_fiction = copy.deepcopy(task)              # Создаем фиктивное задание
             task_fiction.prediction_years[task.prediction_years_iteration] = year_i
             task_fiction.prediction_years_secret = task.prediction_years[task.prediction_years_iteration]
             verdict_i, succses = get_one_verdict(model, row, vega_api, task_fiction)
-            print('verdict_i_type', type(verdict_i))
-
-            print('verdict = ', verdict_i)
-            print('verdict_i.verdict = ', verdict_i.verdict)
 
             try:
                 verdict_i.verdict.astype(float)
@@ -2161,21 +2618,21 @@ def predict_and_correction_real(model, row, vega_api, task):
             predicts_for_past.append(float(verdict_i.verdict))
             print('verdict_i ', verdict_i)
 
-        task.prediction_years_secret = task.prediction_years[task.prediction_years_iteration]
-        verdict_bc, succses = get_one_verdict(model, row, vega_api, task)
 
-        average = find_average_prod_in_row(row, task)
         prods_available = prods_available[0: len(predicts_for_past)]
 
         print('prods_available', prods_available)
         print('predicts_for_past', predicts_for_past)
         print('years_available', years_available[0: len(predicts_for_past)])
 
-        verdict_corrected = copy.deepcopy(verdict_bc)
-
-        verdict_corrected.verdict, predicts_for_past_corrected = verdict_normalization(prods_available, predicts_for_past, copy.deepcopy(verdict_bc.verdict))
-
-        verdict_corrected = print_metrics(prods_available, predicts_for_past_corrected, None, verdict_corrected)
+        if verdict_bc.verdict != 'inf processor error':
+            verdict_corrected = copy.deepcopy(verdict_bc)
+            if predicts_for_past != []:
+                verdict_corrected.verdict, predicts_for_past_corrected = verdict_normalization_v2(prods_available, predicts_for_past, copy.deepcopy(verdict_bc.verdict))
+                verdict_corrected = print_metrics(prods_available, predicts_for_past_corrected, None, verdict_corrected, task, years_available, predicts_for_past)
+        else:
+            verdict_corrected = Answer(verdict='')
+            average = ''
 
         print('verdict_bc', verdict_bc.verdict)
         print('average', average)
@@ -2186,6 +2643,8 @@ def predict_and_correction_real(model, row, vega_api, task):
         verdict_bc, succses = get_one_verdict(model, row, vega_api, task)
         verdict_corrected, average = verdict_bc, find_average_prod_in_row(row, task)
 
+
+    # print(hohoho)
 
     return verdict_corrected, average
 
@@ -2202,7 +2661,9 @@ def predict_array(row, task) -> Tuple[list, float]:   # Получаем стр�
     verdicts = []
     success = True
 
-    vega_api = VegaAPI(task.login, task.password)   # Инициализируем экземпляр класса, с где будет храниться сеанс подключения к сайту для загрузки рассчетных данных
+    vv = []
+
+    vega_api = VegaAPI()   # Инициализируем экземпляр класса, с где будет храниться сеанс подключения к сайту для загрузки рассчетных данных
 
     for i in range(len(column_models)):         # Итерации по моделям
         years_list_in_row, _ = gel_years_list_with_prods(task, row, all_points=True)    # Получим список годов, для которых у нас имеются продуктивности в обрабатываемой строчке документа
@@ -2217,6 +2678,8 @@ def predict_array(row, task) -> Tuple[list, float]:   # Получаем стр�
             model, model_name = model_list[i], column_models[i]
             model.activate()    # Активируем модель (произойдут предварительные приготовления)
 
+            model = specify_the_parameters(row, model)
+
             year = task.prediction_years[task.prediction_years_iteration]     # Загрузим год, для которого делается предсказание
             model_name_in_cap = model_name + '_predict_' + year
             print('model_name_in_cap', model_name_in_cap, 'years', year)
@@ -2227,30 +2690,45 @@ def predict_array(row, task) -> Tuple[list, float]:   # Получаем стр�
 
             else:
                 if str(row[model_name_in_cap]) == 'nan':     # Если в данной строке столбец с ответом все еще не заполнен, запускается расчет
-                    verdict, average = predict_and_correction_real(model, row, vega_api, task)  # Запускается расчет
+                    try:
+                        verdict, average = predict_and_correction_real(model, row, vega_api, task)  # Запускается расчет
+                    except:
+                        print('При попытке произвести рассчет произошла ошибка!')
+                        verdict = Answer(verdict='')
+                        average = ''
                 else:
-                    verdict = Answer(verdict='nan')
+                    verdict = Answer(verdict=float(row[model_name_in_cap]))
                     print('Ведрикт уже записан!', verdict)
                     average = row['Average productivity']
-
-
-            verdicts.append(verdict)
 
         else:
             verdict = Answer(verdict='')
             average = ''
+            year = task.prediction_years[task.prediction_years_iteration]
 
-    return verdicts, average
+        print('* year', year, 'vardict', verdict.verdict)
+
+        vv.append(verdict.verdict)
+
+        verdicts.append(verdict)
+
+    return verdicts, average, vv
 
 
 def record_additional_information(df_destination, index, answer):
 
     unconditional_dict = answer.inf_unconditional
-    dict_keys_list = unconditional_dict.keys()
+    dict_keys_list = list(unconditional_dict.keys())
 
-    for key in dict_keys_list:
-        print('unconditional_dict[key]', key, unconditional_dict[key])
-        df_destination.loc[index, str(key)] = unconditional_dict[key]
+    print('dict_keys_list', dict_keys_list)
+
+    for i in range(len(dict_keys_list)):
+        key_i = dict_keys_list[i]
+        print('unconditional_dict[key]', key_i, unconditional_dict[key_i])
+
+        print('index, str(key_i)', index, str(key_i))
+
+        df_destination.loc[index, str(key_i)] = unconditional_dict[str(key_i)]
 
     additional_dict = answer.additional_inf
     dict_keys_list = list(additional_dict.keys())
@@ -2262,6 +2740,41 @@ def record_additional_information(df_destination, index, answer):
 
     return df_destination
 
+def specify_the_parameters(row, model):
+    '''In this function, specify the culture in this line of the task and set the desired ndvi mask,
+    in accordance with the area where the culture grows'''
+    print('df_destination', row)
+    print("df_destination['culture']", row['culture'])
+
+    culture = row['culture'].lower()
+    id_region = row['id_region']
+
+    print('culture', culture, 'id_region', id_region)
+
+    pd_file = model.pd_masks
+    parms = model.parms
+
+    print('parms_in_model_before', parms)
+
+    for i in range(len(parms)):
+        parm_i = parms[i]
+        if 'ndvi' in parm_i:
+            res_ndvi = pd_file[(pd_file['id_region'].astype(str).str.contains(str(id_region)))]
+
+            print('res_ndvi', res_ndvi)
+            mask_i = res_ndvi[culture].values[0]
+
+            if 'histor' in parm_i:
+                mask_i = mask_i + '_historical'
+            else:
+                parms[i] = mask_i
+
+    print('parms_in_model_after', parms)
+    model.parms = parms
+
+    # print(heheh)
+
+    return model
 
 def download_and_prediction(task):  # Идет перебор по стокам задания, получаем ответы всех моделей и записываем
 
@@ -2270,38 +2783,65 @@ def download_and_prediction(task):  # Идет перебор по стокам 
     print('Путь к резервной копии', way, '\n')
     df_destination = pd.read_excel(way, index_col='Unnamed: 0')
 
-    interest_head = ['id_country', 'region', 'district', 'culture', 'id_region', 'id_district', 'Average productivity']
     column_predict = task.column_predict
+
+    print('column_predict', column_predict)
 
     with alive_bar(df_destination.shape[0], force_tty=True) as bar:
         for index, row in df_destination.iterrows():  # Итерации по списку задания
 
-            row_predict, average = predict_array(row, task)     # Передаем функции строку и экземпляр класса задания
+            row_predict, average, vv = predict_array(row, task)     # Передаем функции строку и экземпляр класса задания
             print('average', average)
             df_destination.loc[index, 'Average productivity'] = average
 
             for i in range(len(row_predict)):
-                if row_predict[i].verdict != 'nan':
-                    df_destination.loc[index, column_predict[i]] = row_predict[i].verdict
-                    df_destination = record_additional_information(df_destination, index, row_predict[i])
+                # if row_predict[i].verdict != 'nan':
+                df_destination.loc[index, column_predict[i]] = row_predict[i].verdict
+                df_destination = record_additional_information(df_destination, index, row_predict[i])
 
             df_destination.to_excel(way_2)
+
+            print('column_predict', column_predict)
+            print('vv', vv)
+
+            # print('')
+            # print(hehehe)
             bar()
     return True
+
+def ukey_Loader(task,
+                directory="Service_files\\Common_information\\".replace('\\', os.sep),
+                file='Your_key.xlsx',
+                key = None):
+    'Откроем файл, запишем номер ukey в переменную экземпляра класса task'
+
+    if key == None:
+        file_name = directory + file
+        file_key = pd.read_excel(file_name)
+        # print('pd', file_key)
+        ukey = str(file_key["you_key"].loc[0])
+        print('ukey', ukey)
+        task.ukey = ukey
+
+    else:
+        task.ukey = key
+    # print(heheh)
+
+    return task
 
 
 def main():
     print('Добро пожаловать в Nerual Rabbit!', '\n')
-
     task = fast_user_survey()       # Функция возвращает экземпляр класса с заданием. Позже следует заменить эту часть функцией, реализующей интерфейс.
-    print('Получено задание: ', task.task_file, '\n')
 
+    print('Получено задание: ', task.task_file, '\n')
     task = destination_analysis(task)
     task = model_Loader(task)  # Загрузка выбранной модели
+    task = ukey_Loader(task) # Передадим экземпляру класса с заданием ключа для запросов даннных у онлайн сервиса.
     succes = download_and_prediction(task)  # Запуск цикла загрузок данных и предсказания.
 
+    print('Выполнение задания успешно завершено!', '\n')
 
-    pass
 
 if __name__ == '__main__':
     # cProfile.run('main()')
