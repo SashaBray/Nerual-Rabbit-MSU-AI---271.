@@ -110,9 +110,9 @@ class ModelWrapper():
         self.task = task
         self.masks = masks
 
-    def activate(self, directory='Service_files\Models\\'.replace('\\', os.sep),
-                 parm_file='\parms.json', prossesing='\prossesing.json'.replace('\\', os.sep),
-                 masks_directory="Service_files\Common_information\\".replace('\\', os.sep), masks_file='Cultures_masks.xlsx'):
+    def activate(self, directory=f'Service_files{os.sep}Models{os.sep}'.replace('\\', os.sep),
+                 parm_file=f'{os.sep}parms.json', prossesing=f'{os.sep}prossesing.json'.replace('\\', os.sep),
+                 masks_directory=f"Service_files{os.sep}Common_information{os.sep}".replace('\\', os.sep), masks_file='Cultures_masks.xlsx'):
 
         way = directory + self.model_name
 
